@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Talk to our AI Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/retell-client-js-sdk@2.0.7/dist/index.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; text-align:center; margin:40px; }
+    button { padding:12px 18px; border-radius:8px; font-size:16px; cursor:pointer; margin:6px; border:none; }
+    #callBtn { background:#22c55e; color:white; }
+    #hangBtn { background:#ef4444; color:white; display:none; }
+    #status { margin-top:12px; font-size:14px; }
+  </style>
+</head>
+<body>
+  <h1>🎤 Talk to Jane, the ImpactAgent voice agent</h1>
+  <p>Click below to connect</p>
+  <button id="callBtn">Start Call</button>
+  <button id="hangBtn">Hang Up</button>
+  <div id="status">Ready.</div>
+
+  <script>
+    // 👉 Replace with your Zapier Catch Hook URL
+    const MINT_URL = "https://hooks.zapier.com/hooks/catch/23863897/uh3c1gn/";
+
+    const { RetellWebClient } = window.retellClientJsSdk || {};
+    const client = new RetellWebClient();
+    const callBtn = document.getElementById("callBtn");
+    const hangBtn = document.getElementById("hangBtn");
+    const statusEl = document.getElementById("status");
+    let inCall = false;
+
+    function setStatus(msg){ statusEl.textContent = msg; }
+
+    async function startCall(){
+      try {
+        callBtn.disabled = true;
+        setStatus("Connecting… allow microphone access");
+        const res = await fetch(MINT_URL, { method:"POST" });
+        if(!res.ok) throw new Error("Zap failed");
+        const { access_token } = await res.json();
+        await client.startCall({ accessToken: access_token });
+        inCall = true;
+        callBtn.style.display="none"; hangBtn.style.display="inline-block";
+        setStatus("Connected. You can speak now.");
+        callBtn.disabled=false;
+      } catch(err){
+        console.error(err);
+        setStatus("Error starting call. Try again.");
+        callBtn.disabled=false;
+      }
+    }
+
+    function endCall(){
+      try{ client.stopCall(); }catch(_){}
+      inCall=false;
+      callBtn.style.display="inline-block"; hangBtn.style.display="none";
+      setStatus("Call ended.");
+    }
+
+    callBtn.addEventListener("click", ()=>{ if(!inCall) startCall(); });
+    hangBtn.addEventListener("click", endCall);
+    client.on?.("call_ended", endCall);
+    client.on?.("error", (e)=>{ console.error(e); endCall(); setStatus("Error during call."); });
+  </script>
+</body>
+</html>
