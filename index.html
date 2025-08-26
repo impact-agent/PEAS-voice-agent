@@ -4,102 +4,99 @@
   <meta charset="utf-8" />
   <title>Talk to our AI Agent</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <!-- Stable UMD build of Retell SDK -->
-  <script src="https://unpkg.com/retell-client-js-sdk/dist/index.umd.js"></script>
+  <!-- Stable Retell SDK build -->
+  <script src="https://cdn.jsdelivr.net/npm/retell-client-js-sdk@2.0.7/dist/index.min.js"></script>
   <style>
     body { font-family: system-ui, sans-serif; text-align:center; margin:40px; }
-    button { padding:12px 18px; border-radius:8px; font-size:16px; cursor:pointer; margin:6px; border:none; }
-    #callBtn { background:#22c55e; color:white; }
-    #hangBtn { background:#ef4444; color:white; display:none; }
-    #status { margin-top:12px; font-size:14px; }
-    #log { text-align:left; max-width:860px; margin:16px auto; background:#0b1220; color:#e5e7eb; padding:12px; border-radius:8px; overflow:auto; display:none; }
+    h1 { display:inline-block; background:#2f64e1; color:#fff; padding:10px 16px; border-radius:8px; }
+    p.note { background:#2f64e1; color:#fff; padding:8px 12px; border-radius:6px; display:inline-block; }
+    button { padding:12px 18px; border-radius:12px; font-size:16px; cursor:pointer; margin:16px auto; border:none; color:#fff; }
+    #callBtn { background:#22c55e; }
+    #hangBtn { background:#ef4444; display:none; }
+    #status { margin-top:10px; }
+    #log { text-align:left; max-width:860px; margin:16px auto; background:#0b1220; color:#e5e7eb;
+           padding:12px; border-radius:8px; overflow:auto; display:none; }
   </style>
 </head>
 <body>
   <h1>🎤 Talk to our AI Agent</h1>
-  <p>Uses your internet (no phone charges). Click “Start Call” and allow microphone access.</p>
+  <p class="note">Uses your internet (no phone charges). Click “Start Call” and allow microphone access.</p>
 
-  <button id="callBtn">Start Call</button>
-  <button id="hangBtn">Hang Up</button>
+  <div>
+    <button id="callBtn">Start Call</button>
+    <button id="hangBtn">Hang Up</button>
+  </div>
+
   <div id="status">Ready.</div>
   <pre id="log"></pre>
 
   <script>
-    // 👉 Paste your Zapier Catch Hook URL here:
+    // 👉 Your Zapier Catch Hook URL
     const MINT_URL = "https://hooks.zapier.com/hooks/catch/23863897/uh3c1gn/";
 
-    // Helper: visible debug
+    // Helpers
+    const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
-    function log(msg, obj) {
-      logEl.style.display = 'block';
+    function setStatus(t){ statusEl.textContent = t; }
+    function log(msg, obj){
+      logEl.style.display='block';
       logEl.textContent += `[${new Date().toISOString()}] ${msg}\n` + (obj ? JSON.stringify(obj, null, 2) + '\n' : '');
-      console.log(msg, obj || '');
+      console.log(msg, obj||'');
     }
-    function setStatus(t){ document.getElementById('status').textContent = t; }
 
-    // Get the SDK constructor safely
-    function getRetellCtor() {
+    // Get Retell client safely from the SDK namespace
+    function getClient(){
       const g = window;
-      return g.RetellWebClient || (g.retellClientJsSdk && g.retellClientJsSdk.RetellWebClient) || null;
+      if (g.retellClientJsSdk && g.retellClientJsSdk.RetellWebClient) {
+        try { return new g.retellClientJsSdk.RetellWebClient(); } catch(e){ console.error(e); }
+      }
+      return null;
     }
-    const RetellCtor = getRetellCtor();
-    const client = RetellCtor ? new RetellCtor() : null;
+    let client = getClient();
+
+    // Minimal POST (no headers/body) so browsers don’t preflight the request
+    async function mintToken(){
+      const r = await fetch(MINT_URL, { method:'POST' });
+      const text = await r.text();
+      try { return JSON.parse(text); }
+      catch(e){ log("Zap did not return JSON. Raw:", text); throw new Error("Could not get a token (Zap Step 3 must reply)."); }
+    }
 
     const callBtn = document.getElementById('callBtn');
     const hangBtn = document.getElementById('hangBtn');
     let inCall = false;
 
-    async function mintToken() {
-      // Preflight-free POST (no headers/body) to avoid browser blocks
-      const r = await fetch(MINT_URL, { method: 'POST' });
-      const text = await r.text();
-      try {
-        const json = JSON.parse(text);
-        return json; // { access_token, call_id }
-      } catch (e) {
-        log("Zap did not return JSON (likely Step 3 not returning data). Raw:", text);
-        throw new Error("Could not get a token. Please try again.");
-      }
-    }
-
     async function startCall(){
-      try {
-        if (!client) { setStatus("Agent not ready—refresh the page."); return; }
+      try{
+        if(!client){ setStatus("Agent not ready—refresh the page."); log("SDK client missing"); return; }
         callBtn.disabled = true;
-        setStatus("Connecting… please allow microphone access");
-        log("POSTing to Zap", { url: MINT_URL });
-
+        setStatus("Connecting… please allow microphone");
+        log("POST to Zap", { url: MINT_URL });
         const { access_token, call_id } = await mintToken();
-        log("Got token", { call_id, access_token_preview: (access_token || '').slice(0, 8) + "…" });
-
-        if (!access_token) throw new Error("No access_token returned");
+        log("Got token", { call_id, access_token_preview: (access_token||'').slice(0,12) + "…" });
+        if(!access_token) throw new Error("No access_token from Zap");
         await client.startCall({ accessToken: access_token });
-
         inCall = true;
-        callBtn.style.display = "none";
-        hangBtn.style.display = "inline-block";
+        callBtn.style.display='none'; hangBtn.style.display='inline-block';
         setStatus("Connected. You can speak now.");
-      } catch (e) {
-        console.error(e);
-        setStatus(e.message || "Error starting call.");
-      } finally {
+      }catch(e){
+        console.error(e); setStatus(e.message || "Error starting call. See log."); 
+      }finally{
         callBtn.disabled = false;
       }
     }
 
     function endCall(){
-      try { client && client.stopCall && client.stopCall(); } catch(_){}
+      try{ client && client.stopCall && client.stopCall(); }catch(_){}
       inCall = false;
-      hangBtn.style.display = "none";
-      callBtn.style.display = "inline-block";
+      hangBtn.style.display='none'; callBtn.style.display='inline-block';
       setStatus("Call ended.");
     }
 
-    callBtn.addEventListener('click', () => { if (!inCall) startCall(); });
+    callBtn.addEventListener('click', ()=>{ if(!inCall) startCall(); });
     hangBtn.addEventListener('click', endCall);
-
     client && client.on && client.on("call_ended", endCall);
-    client && client.on && client.on("error", (e) => { console.error("Retell error", e); endCall(); setStatus("Error during call."); });
+    client && client.on && client.on("error", (e)=>{ console.error("Retell error", e); endCall(); setStatus("Error during call."); });
   </script>
 </body>
 </html>
