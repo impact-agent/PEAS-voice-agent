@@ -1,3 +1,22 @@
+<button id="ping">Test Zap POST</button>
+<pre id="out" style="max-width:800px;margin:12px auto;background:#111;color:#eee;padding:10px;border-radius:8px;"></pre>
+
+<script>
+const out = document.getElementById('out');
+function log(s){ out.textContent += s + '\n'; }
+
+document.getElementById('ping').addEventListener('click', async () => {
+  try {
+    // 1) Preflight-free POST (no headers/body)
+    const r = await fetch(MINT_URL, { method: 'POST' });
+    log('Status: ' + r.status);
+    const t = await r.text();
+    log('Body: ' + t);
+  } catch (e) {
+    log('Error: ' + (e.message || e));
+  }
+});
+</script>
 <!doctype html>
 <html lang="en">
 <head>
