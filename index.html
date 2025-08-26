@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { --blue:#2f64e1; --green:#22c55e; --red:#ef4444; --ink:#0b1220; --paper:#0f172a; --text:#e5e7eb; }
-    html,body { height:100%; }
     body {
       margin:0; background: var(--paper); color:var(--text);
       font: 16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
@@ -25,11 +24,10 @@
     #status { margin-top:8px; opacity:.95; }
     #log { margin-top:14px; display:none; background:var(--ink); color:#e5e7eb; padding:12px;
            border-radius:10px; overflow:auto; max-height:40vh; }
-    a { color:#9bc1ff; }
   </style>
 
-  <!-- Load the Retell SDK locally (self-hosted) -->
-  <script src="./sdk/retell-sdk.min.js"></script>
+  <!-- Load the Retell SDK from your repo -->
+  <script src="https://impact-agent.github.io/BHI-voice-agent/sdk/retell-sdk.min.js?v=1"></script>
 </head>
 <body>
   <main class="card">
@@ -46,10 +44,9 @@
   </main>
 
   <script>
-    // 👉 Your token-mint endpoint (Cloudflare Worker). Change here only if you rename your Worker URL.
+    // 👉 Your Cloudflare Worker mint URL
     const MINT_URL = "https://frosty-poetry-a7a6.jocelyn-379.workers.dev/";
 
-    // ---------- UI helpers ----------
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
     const callBtn = document.getElementById('callBtn');
@@ -62,10 +59,9 @@
       console.log(msg, obj||'');
     }
 
-    // ---------- Retell SDK detection ----------
+    // ---- SDK detection ----
     function getRetellCtor() {
       const g = window;
-      // Try common global export names (covers different bundles)
       return (
         g.retellClientJsSdk?.RetellWebClient ||
         g.RetellWebClient ||
@@ -75,82 +71,24 @@
       );
     }
 
+    function when(conditionFn, timeoutMs = 5000, intervalMs = 50) {
+      return new Promise((resolve, reject) => {
+        const start = Date.now();
+        const t = setInterval(() => {
+          if (conditionFn()) { clearInterval(t); resolve(true); }
+          else if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error("SDK load timeout")); }
+        }, intervalMs);
+      });
+    }
+
     let client = null;
     let inCall = false;
 
-    function ensureClient() {
+    async function ensureClient() {
       if (client) return true;
-      const Ctor = getRetellCtor();
-      if (!Ctor) { log("SDK not found on window. Did ./sdk/retell-sdk.min.js load?"); return false; }
       try {
-        client = new Ctor();
-        // Safety: attach listeners if available
-        client.on?.("call_ended", endCall);
-        client.on?.("error", (e)=>{ console.error("Retell error", e); endCall(); setStatus("Error during call."); });
-        return true;
-      } catch(e) {
-        log("Failed to construct Retell client", { message: e.message });
-        return false;
-      }
-    }
+        await when(() => !!getRetellCtor());
+        const Ctor = getRetellCtor();
+        if (!Ctor) throw new Error("SDK constructor
 
-    // ---------- Mint token from Worker ----------
-    async function mintToken(){
-      // Minimal POST (no headers/body) avoids CORS preflight
-      const r = await fetch(MINT_URL, { method:'POST' });
-      const text = await r.text();
-      try {
-        return JSON.parse(text); // { access_token, call_id }
-      } catch(e){
-        log("Mint endpoint did not return JSON", text);
-        throw new Error("Could not get a token. Check Worker and try again.");
-      }
-    }
-
-    // ---------- Call controls ----------
-    async function startCall(){
-      try{
-        callBtn.disabled = true;
-        setStatus("Preparing agent…");
-        const ok = ensureClient();
-        if (!ok) { setStatus("Agent not ready. Refresh and try again."); return; }
-
-        setStatus("Connecting… please allow microphone");
-        log("POST to mint URL", { url: MINT_URL });
-        const { access_token, call_id } = await mintToken();
-        log("Got token", { call_id, access_token_preview: (access_token||'').slice(0, 12) + "…" });
-
-        if (!access_token) throw new Error("No access_token returned");
-        await client.startCall({ accessToken: access_token });
-
-        inCall = true;
-        callBtn.style.display='none'; hangBtn.style.display='inline-block';
-        setStatus("Connected. You can speak now.");
-      } catch(e){
-        setStatus(e.message || "Error starting call. See log.");
-        log("startCall error", { message: e.message });
-      } finally {
-        callBtn.disabled = false;
-      }
-    }
-
-    function endCall(){
-      try{ client?.stopCall?.(); }catch(_){}
-      inCall = false;
-      hangBtn.style.display='none'; callBtn.style.display='inline-block';
-      setStatus("Call ended.");
-    }
-
-    // ---------- Wire up buttons ----------
-    callBtn.addEventListener('click', ()=>{ if(!inCall) startCall(); });
-    hangBtn.addEventListener('click', endCall);
-
-    // ---------- Initial status ----------
-    (function init(){
-      const ok = ensureClient();
-      setStatus(ok ? "Ready." : "Agent not ready — check that ./sdk/retell-sdk.min.js exists.");
-    })();
-  </script>
-</body>
-</html>
 
