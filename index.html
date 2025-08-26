@@ -5,56 +5,56 @@
   <title>Talk to our AI Agent</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: system-ui, sans-serif; text-align:center; margin:40px; }
-    h1 { display:inline-block; background:#2f64e1; color:#fff; padding:10px 16px; border-radius:8px; }
-    p.note { background:#2f64e1; color:#fff; padding:8px 12px; border-radius:6px; display:inline-block; }
-    button { padding:12px 18px; border-radius:12px; font-size:16px; cursor:pointer; margin:16px auto; border:none; color:#fff; }
-    #callBtn { background:#22c55e; }
-    #hangBtn { background:#ef4444; display:none; }
-    #status { margin-top:10px; }
-    #log { text-align:left; max-width:860px; margin:16px auto; background:#0b1220; color:#e5e7eb; padding:12px; border-radius:8px; overflow:auto; display:none; }
+    :root { --blue:#2f64e1; --green:#22c55e; --red:#ef4444; --ink:#0b1220; --paper:#0f172a; --text:#e5e7eb; }
+    html,body { height:100%; }
+    body {
+      margin:0; background: var(--paper); color:var(--text);
+      font: 16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      display:grid; place-items:center; padding:28px;
+    }
+    .card { width:min(860px,94vw); background:#0c1324; border:1px solid rgba(255,255,255,.08);
+            border-radius:16px; padding:22px; box-shadow:0 10px 35px rgba(0,0,0,.35); }
+    h1 { margin:0 0 10px; font-size:22px; }
+    .note { background:var(--blue); color:#fff; display:inline-block; padding:8px 12px; border-radius:6px; }
+    .row { margin:16px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    button {
+      padding:12px 18px; border-radius:12px; font-size:16px; border:none; cursor:pointer; color:#fff;
+    }
+    #callBtn { background:var(--green); }
+    #hangBtn { background:var(--red); display:none; }
+    #status { margin-top:8px; opacity:.95; }
+    #log { margin-top:14px; display:none; background:var(--ink); color:#e5e7eb; padding:12px;
+           border-radius:10px; overflow:auto; max-height:40vh; }
+    a { color:#9bc1ff; }
   </style>
 
-  <!-- Primary SDK (jsDelivr); we add it dynamically so we can fall back if it fails -->
-  <script>
-    // Load a script with fallback
-    function loadScript(src){ 
-      return new Promise((resolve,reject)=>{ 
-        const s=document.createElement('script'); 
-        s.src=src; s.onload=resolve; s.onerror=reject; 
-        document.head.appendChild(s);
-      });
-    }
-    // Try primary, then fallback CDN
-    window.__loadRetell = async () => {
-      try { 
-        await loadScript("https://cdn.jsdelivr.net/npm/retell-client-js-sdk@2.0.7/dist/index.min.js");
-      } catch(_) { 
-        await loadScript("https://unpkg.com/retell-client-js-sdk@2.0.7/dist/index.min.js");
-      }
-      return true;
-    };
-  </script>
+  <!-- Load the Retell SDK locally (self-hosted) -->
+  <script src="./sdk/retell-sdk.min.js"></script>
 </head>
 <body>
-  <h1>🎤 Talk to our AI Agent</h1>
-  <p class="note">Uses your internet (no phone charges). Click “Start Call” and allow microphone access.</p>
+  <main class="card">
+    <h1>🎤 Talk to our AI Agent</h1>
+    <div class="note">Uses your internet (no phone charges). Click “Start Call” and allow microphone access.</div>
 
-  <div>
-    <button id="callBtn">Start Call</button>
-    <button id="hangBtn">Hang Up</button>
-  </div>
+    <div class="row">
+      <button id="callBtn">Start Call</button>
+      <button id="hangBtn">Hang Up</button>
+      <span id="status">Loading agent…</span>
+    </div>
 
-  <div id="status">Loading agent…</div>
-  <pre id="log"></pre>
+    <pre id="log"></pre>
+  </main>
 
   <script>
-    // 👉 Your token-mint endpoint (Cloudflare Worker)
+    // 👉 Your token-mint endpoint (Cloudflare Worker). Change here only if you rename your Worker URL.
     const MINT_URL = "https://frosty-poetry-a7a6.jocelyn-379.workers.dev/";
 
-    // Debug helpers
+    // ---------- UI helpers ----------
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const callBtn = document.getElementById('callBtn');
+    const hangBtn = document.getElementById('hangBtn');
+
     function setStatus(t){ statusEl.textContent = t; }
     function log(msg, obj){
       logEl.style.display='block';
@@ -62,55 +62,67 @@
       console.log(msg, obj||'');
     }
 
+    // ---------- Retell SDK detection ----------
+    function getRetellCtor() {
+      const g = window;
+      // Try common global export names (covers different bundles)
+      return (
+        g.retellClientJsSdk?.RetellWebClient ||
+        g.RetellWebClient ||
+        g.retell?.RetellWebClient ||
+        g.Retell?.RetellWebClient ||
+        null
+      );
+    }
+
     let client = null;
     let inCall = false;
-    const callBtn = document.getElementById('callBtn');
-    const hangBtn = document.getElementById('hangBtn');
 
-    // Wait for SDK to be available and construct the client
-    async function ensureClient() {
+    function ensureClient() {
       if (client) return true;
-      // Load SDK (with fallback) if not already present
-      await (window.__loadRetell?.());
-      const g = window;
-      const Ctor = g.retellClientJsSdk && g.retellClientJsSdk.RetellWebClient;
-      if (!Ctor) {
-        log("SDK not found on window.retellClientJsSdk. If you use an ad/privacy blocker, try Incognito.");
-        return false;
-      }
+      const Ctor = getRetellCtor();
+      if (!Ctor) { log("SDK not found on window. Did ./sdk/retell-sdk.min.js load?"); return false; }
       try {
         client = new Ctor();
+        // Safety: attach listeners if available
         client.on?.("call_ended", endCall);
         client.on?.("error", (e)=>{ console.error("Retell error", e); endCall(); setStatus("Error during call."); });
         return true;
       } catch(e) {
-        log("Failed to construct client", { message: e.message });
+        log("Failed to construct Retell client", { message: e.message });
         return false;
       }
     }
 
+    // ---------- Mint token from Worker ----------
     async function mintToken(){
-      // Preflight-free POST to avoid CORS issues
+      // Minimal POST (no headers/body) avoids CORS preflight
       const r = await fetch(MINT_URL, { method:'POST' });
       const text = await r.text();
-      try { return JSON.parse(text); }
-      catch(e){ log("Mint endpoint did not return JSON", text); throw new Error("Could not get a token. Try again."); }
+      try {
+        return JSON.parse(text); // { access_token, call_id }
+      } catch(e){
+        log("Mint endpoint did not return JSON", text);
+        throw new Error("Could not get a token. Check Worker and try again.");
+      }
     }
 
+    // ---------- Call controls ----------
     async function startCall(){
       try{
         callBtn.disabled = true;
         setStatus("Preparing agent…");
-        const ok = await ensureClient();
+        const ok = ensureClient();
         if (!ok) { setStatus("Agent not ready. Refresh and try again."); return; }
 
         setStatus("Connecting… please allow microphone");
         log("POST to mint URL", { url: MINT_URL });
         const { access_token, call_id } = await mintToken();
         log("Got token", { call_id, access_token_preview: (access_token||'').slice(0, 12) + "…" });
-        if (!access_token) throw new Error("No access_token returned");
 
+        if (!access_token) throw new Error("No access_token returned");
         await client.startCall({ accessToken: access_token });
+
         inCall = true;
         callBtn.style.display='none'; hangBtn.style.display='inline-block';
         setStatus("Connected. You can speak now.");
@@ -124,19 +136,21 @@
 
     function endCall(){
       try{ client?.stopCall?.(); }catch(_){}
-      inCall=false;
+      inCall = false;
       hangBtn.style.display='none'; callBtn.style.display='inline-block';
       setStatus("Call ended.");
     }
 
+    // ---------- Wire up buttons ----------
     callBtn.addEventListener('click', ()=>{ if(!inCall) startCall(); });
     hangBtn.addEventListener('click', endCall);
 
-    // Kick off SDK load and update status once ready
-    (async () => {
-      const ok = await ensureClient();
-      setStatus(ok ? "Ready." : "Agent not ready—refresh or try Incognito.");
+    // ---------- Initial status ----------
+    (function init(){
+      const ok = ensureClient();
+      setStatus(ok ? "Ready." : "Agent not ready — check that ./sdk/retell-sdk.min.js exists.");
     })();
   </script>
 </body>
 </html>
+
