@@ -20,8 +20,7 @@
     #status { margin-top:8px; opacity:.95; }
     #log { margin-top:14px; display:none; background:var(--ink); color:#e5e7eb; padding:12px;
            border-radius:10px; overflow:auto; max-height:40vh; }
-    .pill { font-size:12px; background:#1b2a55; border:1px solid #274080;
-            border-radius:999px; padding:4px 8px; margin-left:8px }
+    .pill { font-size:12px; background:#1b2a55; border:1px solid #274080; border-radius:999px; padding:4px 8px; margin-left:8px }
   </style>
 </head>
 <body>
@@ -38,16 +37,15 @@
     <pre id="log"></pre>
   </main>
 
-  <!-- Everything below runs as an ES module (browser-native). -->
+  <!-- Everything below runs as an ES module (browser-native; no require()). -->
   <script type="module">
-    // ✅ Import the browser-ready bundle (no require()).
-    // ?bundle ensures dependencies are inlined for browsers.
+    // ✅ Import browser bundle with dependencies inlined.
     import { RetellWebClient } from "https://esm.sh/retell-client-js-sdk@2.0.7?bundle";
 
-    // ---- Config ----
-    const MINT_URL = "https://frosty-poetry-a7a6.jocelyn-379.workers.dev/"; // your Worker
+    // ---- Config: your Cloudflare Worker that returns {access_token, call_id}
+    const MINT_URL = "https://frosty-poetry-a7a6.jocelyn-379.workers.dev/";
 
-    // ---- UI helpers ----
+    // ---- UI helpers
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
     const callBtn = document.getElementById('callBtn');
@@ -62,27 +60,28 @@
       console.log(msg, obj||'');
     }
 
-    // ---- Construct SDK client (now a normal class from the import) ----
+    // ---- Init SDK client (ESM import gives you the class directly)
     let client = null;
     try {
       client = new RetellWebClient();
       sdkSource.style.display = 'inline-block';
       sdkSource.textContent = "SDK: ESM import";
+      setStatus("Ready.");
     } catch (e) {
       setStatus("Could not initialize the agent SDK.");
       log("Failed to construct RetellWebClient", { message: e.message });
     }
 
-    // ---- Token mint from Worker ----
+    // ---- Fetch token from Worker
     async function mintToken(){
-      const r = await fetch(MINT_URL, { method:'POST' });        // preflight-free POST
+      const r = await fetch(MINT_URL, { method:'POST' }); // preflight-free POST
       const text = await r.text();
       try { return JSON.parse(text); }
       catch(e){ log("Mint endpoint did not return JSON", text);
-        throw new Error("Could not get a token. Check Worker."); }
+        throw new Error("Could not get a token. Check Worker/AGENT_ID/API key."); }
     }
 
-    // ---- Call controls ----
+    // ---- Call controls
     let inCall = false;
 
     async function startCall(){
@@ -93,7 +92,7 @@
         log("POST to mint URL", { url: MINT_URL });
 
         const { access_token, call_id } = await mintToken();
-        log("Got token", { call_id, access_token_preview: (access_token||'').slice(0, 12) + "…" });
+        log("Got token", { call_id, access_token_preview:(access_token||'').slice(0,12)+"…" });
         if (!access_token) throw new Error("No access_token returned");
 
         await client.startCall({ accessToken: access_token });
@@ -102,7 +101,7 @@
         setStatus("Connected. You can speak now.");
       } catch(e){
         setStatus(e.message || "Error starting call. See log.");
-        log("startCall error", { message: e.message });
+        log("startCall error", { message:e.message });
       } finally {
         callBtn.disabled = false;
       }
@@ -117,9 +116,7 @@
 
     callBtn.addEventListener('click', ()=>{ if(!inCall) startCall(); });
     hangBtn.addEventListener('click', endCall);
-
-    // Initial status
-    setStatus(client ? "Ready." : "Agent not ready — reload.");
   </script>
 </body>
 </html>
+
