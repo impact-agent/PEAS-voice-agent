@@ -53,12 +53,7 @@
     const sdkSource = document.getElementById('sdkSource');
 
     function setStatus(t){ statusEl.textContent = t; }
-    function log(msg, obj){
-      logEl.style.display='block';
-      logEl.textContent += `[${new Date().toISOString()}] ${msg}\n` +
-        (obj ? JSON.stringify(obj, null, 2) + '\n' : '');
-      console.log(msg, obj||'');
-    }
+    function log(){ /* no on-page logging */ }
 
     // ---- Init SDK client (ESM import gives you the class directly)
     let client = null;
