@@ -1,1 +1,1 @@
-# BHI-voice-agent
+# PEAS-voice-agent
