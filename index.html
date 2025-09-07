@@ -59,8 +59,6 @@
     let client = null;
     try {
       client = new RetellWebClient();
-      sdkSource.style.display = 'inline-block';
-      sdkSource.textContent = "SDK: ESM import";
       setStatus("Ready.");
     } catch (e) {
       setStatus("Could not initialize the agent SDK.");
