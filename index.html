@@ -26,7 +26,8 @@
 <body>
   <main class="card">
     <h1>Talk to Jane, the ImpactAgent voice agent <span id="sdkSource" class="pill" style="display:none"></span></h1>
-    <div class="note">Uses data . Click “Start Call” and allow microphone access.</div>
+    <div class="note">Click "Start Call", then **ALLOW microphone access** when prompted. If no prompt appears, click the lock icon in your browser's address bar and enable microphone permissions.</div>
+
 
     <div class="row">
       <button id="callBtn">Start Call</button>
@@ -76,10 +77,35 @@
 
     // ---- Call controls
     let inCall = false;
+async function checkMicrophonePermission() {
+  try {
+    const permission = await navigator.permissions.query({ name: 'microphone' });
+    if (permission.state === 'denied') {
+      setStatus("Microphone blocked. Please enable microphone access in browser settings.");
+      return false;
+    }
+    return true;
+  } catch (e) {
+    // Fallback: try to get user media directly
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop()); // Clean up
+      return true;
+    } catch (err) {
+      setStatus("Microphone access required. Please allow when prompted.");
+      return false;
+    }
+  }
+}
 
     async function startCall(){
       try{
         if (!client) throw new Error("SDK not ready");
+        
+        // Add permission check
+        const hasPermission = await checkMicrophonePermission();
+        if (!hasPermission) return;
+        
         callBtn.disabled = true;
         setStatus("Connecting… please allow microphone");
         log("POST to mint URL", { url: MINT_URL });
