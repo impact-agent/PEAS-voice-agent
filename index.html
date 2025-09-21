@@ -12,7 +12,14 @@
     .card { width:min(860px,94vw); background:#0c1324; border:1px solid rgba(255,255,255,.08);
             border-radius:16px; padding:22px; box-shadow:0 10px 35px rgba(0,0,0,.35); }
     h1 { margin:0 0 10px; font-size:22px; }
-    .note { background:var(--blue); color:#fff; display:inline-block; padding:8px 12px; border-radius:6px; }
+    .note { 
+      color: var(--text); 
+      display: inline-block; 
+      padding: 8px 12px; 
+      border-radius: 6px; 
+      border: 1px solid rgba(255,255,255,.2);
+      background: rgba(255,255,255,.05);
+    }
     .row { margin:16px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     button { padding:12px 18px; border-radius:12px; font-size:16px; border:none; cursor:pointer; color:#fff; }
     #callBtn { background:var(--green); }
@@ -26,7 +33,7 @@
 <body>
   <main class="card">
     <h1>Talk to Jane, the ImpactAgent voice agent <span id="sdkSource" class="pill" style="display:none"></span></h1>
-    <div class="note">Click "Start Call", then **ALLOW microphone access** when prompted. If no prompt appears, click the lock icon in your browser's address bar and enable microphone permissions.</div>
+    <div class="note">Click "Start Call", then *ALLOW microphone access* when prompted. If no prompt appears, click the lock icon in your browser's address bar and enable microphone permissions.</div>
 
 
     <div class="row">
