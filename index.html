@@ -33,7 +33,7 @@
 <body>
   <main class="card">
     <h1>Talk to Jane, the ImpactAgent voice agent <span id="sdkSource" class="pill" style="display:none"></span></h1>
-    <div class="note">Click "Start Call", then <em>ALLOW microphone access</em> when prompted. If no prompt appears, click the lock icon in your browser's address bar and enable microphone permissions.</div>
+    <div class="note">Click "Start Call", then <em>ALLOW microphone access</em> when prompted. If no prompt appears, click the lock icon in your browser's address bar and enable microphone permissions. Keep this tab active during the call for best connection quality.</div>
 
 
     <div class="row">
@@ -47,101 +47,159 @@
 
   <!-- Everything below runs as an ES module (browser-native; no require()). -->
   <script type="module">
-    // ✅ Import browser bundle with dependencies inlined.
-    import { RetellWebClient } from "https://esm.sh/retell-client-js-sdk@2.0.7?bundle";
+// ✅ Import browser bundle with dependencies inlined.
+import { RetellWebClient } from "https://esm.sh/retell-client-js-sdk@2.0.7?bundle";
 
-    // ---- Config: your Cloudflare Worker that returns {access_token, call_id}
-    const MINT_URL = "https://peas-voice-agent.jocelyn-379.workers.dev/";
+// ---- Config: your Cloudflare Worker that returns {access_token, call_id}
+const MINT_URL = "https://peas-voice-agent.jocelyn-379.workers.dev/";
 
-    // ---- UI helpers
-    const statusEl = document.getElementById('status');
-    const logEl = document.getElementById('log');
-    const callBtn = document.getElementById('callBtn');
-    const hangBtn = document.getElementById('hangBtn');
-    const sdkSource = document.getElementById('sdkSource');
+// ---- UI helpers
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const callBtn = document.getElementById('callBtn');
+const hangBtn = document.getElementById('hangBtn');
 
-    function setStatus(t){ statusEl.textContent = t; }
-    function log(){ /* no on-page logging */ }
+function setStatus(t){ statusEl.textContent = t; }
+function log(message){ 
+  console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
+}
 
-    // ---- Init SDK client (ESM import gives you the class directly)
-    let client = null;
-    try {
-      client = new RetellWebClient();
-      setStatus("Ready.");
-    } catch (e) {
-      setStatus("Could not initialize the agent SDK.");
-      log("Failed to construct RetellWebClient", { message: e.message });
-    }
-
-    // ---- Fetch token from Worker
-    async function mintToken(){
-      const r = await fetch(MINT_URL, { method:'POST' }); // preflight-free POST
-      const text = await r.text();
-      try { return JSON.parse(text); }
-      catch(e){ log("Mint endpoint did not return JSON", text);
-        throw new Error("Could not get a token. Check Worker/AGENT_ID/API key."); }
-    }
-
-    // ---- Call controls
-    let inCall = false;
-async function checkMicrophonePermission() {
+// ---- Mobile throttling prevention
+let wakeLock = null;
+async function preventMobileThrottling() {
   try {
-    const permission = await navigator.permissions.query({ name: 'microphone' });
-    if (permission.state === 'denied') {
-      setStatus("Microphone blocked. Please enable microphone access in browser settings.");
-      return false;
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
     }
-    return true;
   } catch (e) {
-    // Fallback: try to get user media directly
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => track.stop()); // Clean up
-      return true;
-    } catch (err) {
-      setStatus("Microphone access required. Please allow when prompted.");
-      return false;
-    }
+    log('Wake lock not supported');
   }
 }
 
-    async function startCall(){
-      try{
-        if (!client) throw new Error("SDK not ready");
-        
-        // Add permission check
-        const hasPermission = await checkMicrophonePermission();
-        if (!hasPermission) return;
-        
-        callBtn.disabled = true;
-        setStatus("Connecting… please allow microphone");
-        log("POST to mint URL", { url: MINT_URL });
+// ---- Connection monitoring
+let healthCheck;
+let reconnectAttempts = 0;
 
-        const { access_token, call_id } = await mintToken();
-        log("Got token", { call_id, access_token_preview:(access_token||'').slice(0,12)+"…" });
-        if (!access_token) throw new Error("No access_token returned");
+function startHealthCheck() {
+  healthCheck = setInterval(() => {
+    if (inCall) log('Connection active');
+  }, 20000);
+}
 
-        await client.startCall({ accessToken: access_token });
-        inCall = true;
-        callBtn.style.display='none'; hangBtn.style.display='inline-block';
-        setStatus("Connected. You can speak now.");
-      } catch(e){
-        setStatus(e.message || "Error starting call. See log.");
-        log("startCall error", { message:e.message });
-      } finally {
-        callBtn.disabled = false;
-      }
+function stopHealthCheck() {
+  if (healthCheck) {
+    clearInterval(healthCheck);
+    healthCheck = null;
+  }
+}
+
+// ---- Init SDK client
+let client = null;
+try {
+  client = new RetellWebClient();
+  
+  client.on('call_started', () => {
+    log('Call started successfully');
+    setStatus("Connected. You can speak now.");
+    startHealthCheck();
+    reconnectAttempts = 0;
+  });
+
+  client.on('call_ended', (event) => {
+    const reason = event?.reason || 'unknown';
+    log(`Call ended: ${reason}`);
+    stopHealthCheck();
+    
+    // Auto-reconnect on connection failures (not user hangups)
+    if (inCall && !reason.includes('user') && reconnectAttempts < 2) {
+      reconnectAttempts++;
+      log(`Auto-reconnect attempt ${reconnectAttempts}`);
+      setTimeout(() => startCall(), 3000);
+      return;
     }
+  });
 
-    function endCall(){
-      try{ client?.stopCall?.(); }catch(_){}
-      inCall=false;
-      hangBtn.style.display='none'; callBtn.style.display='inline-block';
-      setStatus("Call ended.");
+  client.on('error', (error) => {
+    log(`Error: ${error.type} - ${error.message}`);
+  });
+
+  setStatus("Ready.");
+} catch (e) {
+  setStatus("Could not initialize the agent SDK.");
+  log("SDK init failed: " + e.message);
+}
+
+// ---- Fetch token from Worker
+async function mintToken(){
+  const r = await fetch(MINT_URL, { method:'POST' });
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch(e){ 
+    log("Token fetch failed");
+    throw new Error("Could not get a token. Check Worker/AGENT_ID/API key."); 
+  }
+}
+
+// ---- Call controls
+let inCall = false;
+
+async function startCall(){
+  try{
+    if (!client) throw new Error("SDK not ready");
+    callBtn.disabled = true;
+    
+    // Detect device type and prevent mobile issues
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    log(`Starting call on ${isMobile ? 'mobile' : 'desktop'}`);
+    
+    if (isMobile) {
+      await preventMobileThrottling();
     }
+    
+    setStatus("Connecting… please allow microphone");
 
-    callBtn.addEventListener('click', ()=>{ if(!inCall) startCall(); });
-    hangBtn.addEventListener('click', endCall);
+    const { access_token, call_id } = await mintToken();
+    if (!access_token) throw new Error("No access_token returned");
+
+    await client.startCall({ 
+      accessToken: access_token,
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
+    
+    inCall = true;
+    callBtn.style.display='none'; hangBtn.style.display='inline-block';
+    log(`Call ID: ${call_id}`);
+    
+  } catch(e){
+    setStatus(e.message || "Error starting call.");
+    log("Start call error: " + e.message);
+  } finally {
+    callBtn.disabled = false;
+  }
+}
+
+function endCall(){
+  try{ client?.stopCall?.(); }catch(_){}
+  inCall=false;
+  reconnectAttempts = 0;
+  stopHealthCheck();
+  
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+  }
+  
+  hangBtn.style.display='none'; callBtn.style.display='inline-block';
+  setStatus("Call ended.");
+  log("User ended call");
+}
+
+callBtn.addEventListener('click', ()=>{ if(!inCall) startCall(); });
+hangBtn.addEventListener('click', endCall);
+
   </script>
 </body>
 </html>
